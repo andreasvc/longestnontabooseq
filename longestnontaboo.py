@@ -1,14 +1,27 @@
-"""Given a set of taboo n-grams and a text, find the longest sequence of
-tokens without any of the taboo n-grams. An n-gram is represented as a string
-of space-separated tokens."""
+"""Given a set of taboo n-grams and a text, find the longest sequence of tokens
+without any of the taboo n-grams. An n-gram is represented as a string of
+space-separated tokens.
+
+Usage: longestnontaboo.py [--len] <taboofile> <filenames...>
+
+Specify taboo n-grams with one n-gram per line in taboofile;
+multiple filenames can be specified.
+By default the output is the longest non-taboo sequence.
+With --len, only the length of this sequence is reported."""
+
+import sys
+import nltk
 import pandas
 
 
-def tokenize(fname):
+def preprocess(fname, lowercase=True):
 	"""Tokenize and lowercase text file."""
 	with open(fname, encoding='utf8') as inp:
-		tokens = nltk.word_tokenize(inp.read().lower())
-	return pandas.Series(tokens)
+		text = inp.read()
+	if lowercase:
+		text = text.lower()
+	tokens = nltk.word_tokenize(text)
+	return pandas.Series(tokens, name=fname)
 
 
 def getngrams(tokens, taboo):
@@ -28,8 +41,8 @@ def getngrams(tokens, taboo):
 	return result
 
 
-def longest_non_taboo_sequence(ngrams, taboo):
-	"""return longest sequence of tokens without any taboo n-grams.
+def taboo_matches(ngrams, taboo):
+	"""return all indices of tokens with taboo n-grams.
 
 	:param ngrams: a list of Series objects, must include n-grams up to
 		the longest n-gram in taboo.
@@ -41,10 +54,24 @@ def longest_non_taboo_sequence(ngrams, taboo):
 	if not istaboo.any():
 		return tokens
 	indices = tokens[istaboo].index
+	return pandas.Series(indices)
+
+
+def longest_non_taboo_sequence(ngrams, taboo):
+	"""return longest sequence of tokens without any taboo n-grams.
+
+	:param ngrams: a list of Series objects, must include n-grams up to
+		the longest n-gram in taboo.
+	:params taboo: a set of strings."""
+	indices = taboo_matches(ngrams, taboo)
+	tokens = ngrams[0]
+	if len(indices) == 0:
+		return tokens
 	# pad the begin and end such since the first or last tokens may
 	# be the longest non-taboo sequence
 	indices = pandas.Series([-1] + list(indices) + [len(tokens)])
-	longest = (indices[1:].values - indices[:-1].values).argmax()
+	lengths = indices[1:].values - indices[:-1].values
+	longest = lengths.argmax()
 	start = indices[longest]
 	end = indices[longest + 1]
 	if start == -1:
@@ -70,10 +97,9 @@ def test_getngrams():
 def test_longest_non_taboo_sequence():
 	text = 'the cat is on the mat . the cat is sleeping .'
 	tokens = pandas.Series(text.split())
-	taboo = {'the cat'}
-	ngrams = getngrams(tokens, taboo)
-	assert len(longest_non_taboo_sequence(ngrams, taboo)) == 5
-	assert (longest_non_taboo_sequence(ngrams, taboo)
+	ngrams = getngrams(tokens, {'the cat'})
+	assert len(longest_non_taboo_sequence(ngrams, {'the cat'})) == 5
+	assert (longest_non_taboo_sequence(ngrams, {'the cat'})
 			== 'is on the mat .'.split()).all()
 	assert (longest_non_taboo_sequence(ngrams, {'the cat', 'the'})
 			== 'is sleeping .'.split()).all()
@@ -81,3 +107,30 @@ def test_longest_non_taboo_sequence():
 			== '. the cat is sleeping .'.split()).all()
 	assert (longest_non_taboo_sequence(ngrams, {'sleeping'})
 			== 'the cat is on the mat . the cat is'.split()).all()
+
+
+def main(*argv):
+	"""CLI."""
+	if len(argv) < 2:
+		print(__doc__)
+		return
+	reportlen = '--len' in sys.argv
+	if reportlen:
+		argv.remove('--len')
+
+	taboofile = argv[0]
+	textfnames = argv[1:]
+	with open(taboofile, encoding='utf8') as inp:
+		taboo = set(inp.read().splitlines())
+	for fname in textfnames:
+		tokens = preprocess(fname)
+		ngrams = getngrams(tokens, taboo)
+		result = longest_non_taboo_sequence(ngrams, taboo)
+		if reportlen:
+			print('%s: %d' % (fname, len(result)))
+		else:
+			print('%s: %s' % (fname, ' '.join(result)))
+
+
+if __name__ == '__main__':
+	main(*sys.argv[1:])
